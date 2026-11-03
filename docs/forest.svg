@@ -10,5 +10,9 @@
 <path d="M161 75Q170 63 179 76Q188 64 197 74" stroke="#819572" stroke-width="3" stroke-linecap="round"/>
 <g fill="#f5e0a4"><circle cx="150" cy="311" r="4"/><circle cx="134" cy="330" r="3"/><circle cx="500" cy="348" r="4"/><circle cx="516" cy="337" r="3"/><circle cx="42" cy="361" r="3"/><circle cx="565" cy="319" r="4"/></g><g stroke="#4f805f" stroke-width="3" stroke-linecap="round"><path d="M167 353L162 344M167 353V340M167 353L173 345M532 372L527 363M532 372V359M532 372L538 364M51 307L46 298M51 307V294M51 307L57 299"/></g>
 <path d="M319 264Q310 258 311 252Q315 248 319 254Q325 246 329 251Q332 258 319 264" fill="#efc99a"/><rect width="620" height="390" fill="url(#dots)"/>
+<g stroke="#557c5a" stroke-width="2.5" stroke-linecap="round"><path d="M117 376V352M117 366q-8-1-10-7m10 12q8-1 11-8M500 382v-27m0 18q-8-1-11-8m11 13q8-1 11-8"/></g>
+<g fill="#fff1ca"><circle cx="117" cy="350" r="4"/><circle cx="112" cy="353" r="3.5"/><circle cx="122" cy="353" r="3.5"/><circle cx="500" cy="352" r="4"/><circle cx="495" cy="355" r="3.5"/><circle cx="505" cy="355" r="3.5"/></g><g fill="#d6a75d"><circle cx="117" cy="353" r="2"/><circle cx="500" cy="355" r="2"/></g>
+<g transform="translate(547 338)"><path d="M8 16v10" stroke="#e2d6b8" stroke-width="7" stroke-linecap="round"/><path d="M-2 16Q-1 1 8 1t10 15Z" fill="#c98564"/><circle cx="4" cy="11" r="2" fill="#f7e2c8"/><circle cx="12" cy="8" r="2" fill="#f7e2c8"/></g>
+<path d="M245 103q13-9 23 0m-15-5q-3-9-11-10m17 12q5-10 13-11" stroke="#a6b991" stroke-width="2" stroke-linecap="round"/>
 <g transform="translate(276 36)"><rect width="103" height="43" rx="17" fill="#fffdf3"/><path d="M26 41L21 53L45 41" fill="#fffdf3"/><text x="51" y="28" fill="#3c624d" font-family="Arial,sans-serif" font-size="21" text-anchor="middle" font-weight="700">Hello!</text></g>
 </svg>
