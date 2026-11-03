@@ -1,4 +1,4 @@
-import { LESSONS } from './content.js';
+import { LESSONS } from './content.js?v=20261103-fun';
 
 export const STORAGE_KEY = 'little-english:progress:v1';
 const DAY_INTERVALS = [0, 1, 3, 7, 14];
@@ -6,6 +6,7 @@ const MAX_SESSIONS = 1000;
 const LESSON_IDS = new Set(LESSONS.map((lesson) => lesson.id));
 const WORDS = LESSONS.flatMap((lesson) => lesson.words.map((word) => ({ ...word, lessonId: lesson.id, lessonTitle: lesson.title })));
 const WORD_IDS = new Set(WORDS.map((word) => word.id));
+const GAME_IDS = new Set(['delivery', 'pairs']);
 
 function asDate(now = Date.now()) {
   const date = new Date(now);
@@ -34,6 +35,7 @@ export function createInitialState() {
   return {
     version: 1,
     lessonProgress: {},
+    gameProgress: {},
     words: {},
     sessions: [],
     activityDays: [],
@@ -70,6 +72,15 @@ function normalizeState(input) {
       attempts: safeCount(entry.attempts),
       lastPromotedOn: typeof entry.lastPromotedOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry.lastPromotedOn) ? entry.lastPromotedOn : null,
       lastPracticedAt: validDate(entry.lastPracticedAt) ? new Date(entry.lastPracticedAt).toISOString() : null,
+    };
+  }
+  for (const id of GAME_IDS) {
+    if (!own(input.gameProgress, id)) continue;
+    const entry = input.gameProgress[id];
+    if (!entry || !validDate(entry.completedAt)) continue;
+    state.gameProgress[id] = {
+      completedAt: new Date(entry.completedAt).toISOString(),
+      plays: Math.max(1, safeCount(entry.plays, 1)),
     };
   }
   if (Array.isArray(input.sessions)) {
@@ -194,14 +205,35 @@ export function recordReview(state, wordId, correct, now = Date.now()) {
   return next;
 }
 
+// Games record exploration, independently of lesson completion or vocabulary
+// confidence. Replaying for fun on one day does not multiply completion counts.
+export function completeGame(state, gameId, now = Date.now()) {
+  if (!GAME_IDS.has(gameId)) return state;
+  const next = normalizeState(state);
+  const completedAt = asDate(now).toISOString();
+  const day = localDateKey(now);
+  const previous = next.gameProgress[gameId];
+  if (!previous || localDateKey(previous.completedAt) !== day) {
+    next.gameProgress[gameId] = {
+      completedAt,
+      plays: safeCount((previous?.plays ?? 0) + 1),
+    };
+  }
+  next.activityDays = [...new Set([...next.activityDays, day])].sort().slice(-MAX_SESSIONS);
+  return next;
+}
+
 export function getStats(state, now = Date.now()) {
   const clean = normalizeState(state);
   const today = localDateKey(now);
   const sessionDays = clean.sessions.map((session) => localDateKey(session.completedAt));
   const reviewDays = Object.values(clean.words).filter((word) => word.lastPracticedAt).map((word) => localDateKey(word.lastPracticedAt));
-  const activeDays = [...new Set([...clean.activityDays, ...sessionDays, ...reviewDays])].sort();
+  const gameDays = Object.values(clean.gameProgress).map((game) => localDateKey(game.completedAt));
+  const activeDays = [...new Set([...clean.activityDays, ...sessionDays, ...reviewDays, ...gameDays])].sort();
   return {
     completedLessons: Object.keys(clean.lessonProgress).length,
+    completedGames: Object.keys(clean.gameProgress).length,
+    gamePlays: Object.values(clean.gameProgress).reduce((sum, game) => sum + game.plays, 0),
     learnedWords: Object.values(clean.words).filter((word) => word.attempts > 0).length,
     familiarWords: Object.values(clean.words).filter((word) => word.stage >= 2).length,
     practicedDays: activeDays.length,

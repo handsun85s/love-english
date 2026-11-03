@@ -1,3 +1,4 @@
+param([switch]$RegenerateAll)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Speech
 $speechRoot = Split-Path -Parent $PSScriptRoot
@@ -11,6 +12,7 @@ try {
   $courseFormat = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(22050, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
   foreach ($clip in $speechManifest) {
     $clipPath = Join-Path (Join-Path $speechRoot 'docs/audio') $clip.file
+    if (-not $RegenerateAll -and (Test-Path -LiteralPath $clipPath) -and (Get-Item -LiteralPath $clipPath).Length -gt 1000) { continue }
     $courseSynth.SetOutputToWaveFile($clipPath, $courseFormat)
     $courseSynth.Speak($clip.text)
     $courseSynth.SetOutputToNull()

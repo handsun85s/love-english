@@ -1,11 +1,11 @@
 {
   "name": "little-english-forest",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check docs/app.js && node --check docs/engine.js && node --check docs/content.js"
+    "check": "node --check docs/app.js && node --check docs/engine.js && node --check docs/content.js && node --check docs/playground.js"
   }
 }

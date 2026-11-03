@@ -168,7 +168,127 @@
     "file": "voice-42.wav"
   },
   {
+    "text": "duck",
+    "file": "voice-44.wav"
+  },
+  {
+    "text": "frog",
+    "file": "voice-45.wav"
+  },
+  {
+    "text": "fish",
+    "file": "voice-46.wav"
+  },
+  {
+    "text": "I see a fish.",
+    "file": "voice-47.wav"
+  },
+  {
+    "text": "I see a duck.",
+    "file": "voice-48.wav"
+  },
+  {
+    "text": "I see a frog.",
+    "file": "voice-49.wav"
+  },
+  {
+    "text": "sunny",
+    "file": "voice-50.wav"
+  },
+  {
+    "text": "rainy",
+    "file": "voice-51.wav"
+  },
+  {
+    "text": "windy",
+    "file": "voice-52.wav"
+  },
+  {
+    "text": "It's sunny.",
+    "file": "voice-53.wav"
+  },
+  {
+    "text": "It's rainy.",
+    "file": "voice-54.wav"
+  },
+  {
+    "text": "It's windy.",
+    "file": "voice-55.wav"
+  },
+  {
+    "text": "bee",
+    "file": "voice-56.wav"
+  },
+  {
+    "text": "butterfly",
+    "file": "voice-57.wav"
+  },
+  {
+    "text": "ant",
+    "file": "voice-58.wav"
+  },
+  {
+    "text": "I see a butterfly.",
+    "file": "voice-59.wav"
+  },
+  {
+    "text": "I see a bee.",
+    "file": "voice-60.wav"
+  },
+  {
+    "text": "I see an ant.",
+    "file": "voice-61.wav"
+  },
+  {
+    "text": "water",
+    "file": "voice-62.wav"
+  },
+  {
+    "text": "milk",
+    "file": "voice-63.wav"
+  },
+  {
+    "text": "juice",
+    "file": "voice-64.wav"
+  },
+  {
+    "text": "Water, please.",
+    "file": "voice-65.wav"
+  },
+  {
+    "text": "Milk, please.",
+    "file": "voice-66.wav"
+  },
+  {
+    "text": "Juice, please.",
+    "file": "voice-67.wav"
+  },
+  {
     "text": "Hello! I am happy to see you.",
     "file": "voice-43.wav"
+  },
+  {
+    "text": "An apple, please.",
+    "file": "voice-68.wav"
+  },
+  {
+    "text": "Thank you!",
+    "file": "voice-69.wav"
+  },
+  {
+    "text": "A banana, please.",
+    "file": "voice-70.wav"
+  },
+  {
+    "text": "Some water, please.",
+    "file": "voice-71.wav"
+  },
+  {
+    "text": "Some milk, please.",
+    "file": "voice-72.wav"
+  },
+  {
+    "text": "Some juice, please.",
+    "file": "voice-73.wav"
   }
 ]

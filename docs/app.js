@@ -1,6 +1,7 @@
-import { LESSONS } from './content.js';
-import { AUDIO_FILES } from './audio-map.js';
-import { createInitialState, loadState, saveState, completeLesson, getDueWords, recordReview, getStats } from './engine.js';
+import { LESSONS } from './content.js?v=20261103-fun';
+import { AUDIO_FILES } from './audio-map.js?v=20261103-fun';
+import { GAME_CONFIGS, DELIVERY_ORDERS, createDeliveryRound, createPairDeck, evaluatePair } from './playground.js?v=20261103-fun';
+import { createInitialState, loadState, saveState, completeLesson, completeGame, getDueWords, recordReview, getStats } from './engine.js?v=20261103-fun';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -28,6 +29,8 @@ let state = loadState(storage);
 let page = 'home';
 let lesson = null;
 let review = null;
+let game = null;
+let lessonFilter = 'all';
 let storageOk = true;
 let resetPending = false;
 let voiceProblem = '';
@@ -59,8 +62,15 @@ function cancelAudio() {
 function englishVoice() {
   return window.speechSynthesis?.getVoices().filter(v => /^en(?:[-_]|$)/i.test(v.lang)).sort((a,b) => Number(b.localService)-Number(a.localService) || Number(b.lang==='en-US')-Number(a.lang==='en-US'))[0];
 }
+function audioHelp() {
+  if(game?.id==='pairs')return '可以点“看看词语提示”，让翻开的声音卡显示文字。';
+  if(game?.id==='delivery')return '可以点“想看一点提示”继续。';
+  if(review||lesson?.step===2)return '可以点“看文字提示”继续。';
+  if(lesson?.step===3)return '可以点“给我一点提示”，也可以先听到这里。';
+  return '可以看图和中文继续，也可以请家长检查声音。';
+}
 function audioNotice() {
-  return voiceProblem ? `<div class="audio-status" role="status">${esc(voiceProblem)} 可以点“看文字提示”继续，也可以请家长帮忙设置声音。</div>` : '';
+  return voiceProblem ? `<div class="audio-status" role="status">${esc(voiceProblem)} ${audioHelp()}</div>` : '';
 }
 function speak(text, button, fallback=false) {
   cancelAudio();
@@ -69,7 +79,7 @@ function speak(text, button, fallback=false) {
     const audio=new Audio(AUDIO_FILES[text]); activeAudio=audio;
     audio.playbackRate=state.settings.slowAudio ? .88 : 1;
     const epoch=audioEpoch;
-    audio.onplaying=()=>{if(epoch===audioEpoch){voiceProblem='';button?.classList.add('is-speaking');}};
+    audio.onplaying=()=>{if(epoch===audioEpoch){voiceProblem='';$('.audio-status')?.remove();button?.classList.add('is-speaking');}};
     audio.onended=()=>{if(epoch===audioEpoch){clearTimeout(audioTimeout);button?.classList.remove('is-speaking');activeAudio=null;}};
     audio.onerror=()=>{if(epoch===audioEpoch)speak(text,button,true);};
     audioTimeout=setTimeout(()=>{if(epoch===audioEpoch)speak(text,button,true);},20000);
@@ -84,7 +94,7 @@ function speak(text, button, fallback=false) {
   if (voice) utterance.voice = voice;
   utterance.lang = 'en-US'; utterance.rate = state.settings.slowAudio ? .78 : .95; utterance.pitch = 1.03;
   const epoch = audioEpoch;
-  utterance.onstart = () => { if (epoch !== audioEpoch) return; voiceProblem = ''; button?.classList.add('is-speaking'); };
+  utterance.onstart = () => { if (epoch !== audioEpoch) return; voiceProblem = ''; $('.audio-status')?.remove(); button?.classList.add('is-speaking'); };
   utterance.onend = () => { if(epoch !== audioEpoch) return; clearTimeout(audioTimeout); button?.classList.remove('is-speaking'); };
   utterance.onerror = event => { if(epoch !== audioEpoch || ['interrupted','canceled'].includes(event.error)) return; button?.classList.remove('is-speaking'); clearTimeout(audioTimeout); audioFail('英语声音没有播放成功，请再试一次。'); };
   audioTimeout = setTimeout(() => { if(epoch === audioEpoch) { cancelAudio(); audioFail('还没听到声音？请检查设备音量和英语语音设置。'); } }, 16000);
@@ -93,9 +103,9 @@ function speak(text, button, fallback=false) {
 function audioFail(message) {
   voiceProblem = message;
   toast(`${message} 家长可以在“家长小站”里检查声音。`);
-  if (lesson || review) {
+  if (lesson || review || game) {
     const target = $('.audio-status');
-    if(target) target.textContent = `${message} 可以点“看文字提示”继续。`;
+    if(target) target.textContent = `${message} ${audioHelp()}`;
     else $('.adventure-body')?.insertAdjacentHTML('afterbegin', audioNotice());
   }
 }
@@ -112,8 +122,11 @@ function homePage() {
   const next = LESSONS.find(l => !state.lessonProgress[l.id]) || LESSONS[0];
   const done = Object.keys(state.lessonProgress).length;
   const due=getDueWords(state);
-  const side=['🐦','🍃','🌼','💨','☁️','🍎'];
-  return `${header(`嗨，${state.settings.name}！`,'准备好和森林朋友说 Hello 了吗？')}<section class="hero" aria-labelledby="hero-title"><div class="hero-copy"><span class="tiny-badge"><span class="mini-dot"></span> ${done?'下一站的小冒险':'今天的第一站'} · 约 5–8 分钟</span><h2 id="hero-title">森林里，<br>藏着新朋友。</h2><p>听听它们的声音，帮它们一个小忙。<br>英语，就从一句 Hello 开始。</p>${primary(done?'继续我的冒险':'出发，认识新朋友','start',`data-id="${next.id}"`)}<div class="hero-meta">${icon('heart')}不用全会，愿意试试就很棒</div></div><img class="hero-art" src="./forest.svg" alt="小狐狸和兔子在绿色森林里向你问好"></section><div class="journey-strip"><div class="journey-item"><div class="journey-icon">${icon('sound')}</div><div><strong>先听听，别着急</strong><span>声音和画面，一起认识</span></div></div><div class="journey-item"><div class="journey-icon">${icon('compass')}</div><div><strong>玩一玩，认朋友</strong><span>帮小伙伴，完成小任务</span></div></div><div class="journey-item"><div class="journey-icon">${icon('spark')}</div><div><strong>说一句，也很棒</strong><span>跟着试试，慢慢敢开口</span></div></div></div>${due.length?`<div class="review-banner"><span class="emoji" aria-hidden="true">🌿</span><div><strong>${due.length} 个老朋友想见你</strong><p>先听一听，再看看还认不认识。</p></div>${secondary('去打个招呼','begin-review')}</div>`:''}<section aria-labelledby="explore-title"><div class="section-top"><div><h2 id="explore-title">沿着好奇心出发</h2><p>喜欢哪一站，就从哪一站开始。</p></div><span class="quiet">${icon('leaf')}6 个小故事 · 随心选择</span></div><div class="lesson-grid">${LESSONS.map((l,i)=>`<button class="lesson-card" data-action="start" data-id="${l.id}" aria-label="开始${esc(l.title)}，3个词和1句话"><div class="lesson-art" style="--scene:${l.color}"><span class="lesson-num">CHAPTER 0${i+1}</span>${state.lessonProgress[l.id]?'<span class="lesson-done">✓ 来过这里</span>':''}<span class="scene-emoji" aria-hidden="true">${l.emoji}</span><span class="scene-side" aria-hidden="true">${side[i]}</span></div><div class="lesson-body"><h3>${esc(l.title)}${icon('arrow')}</h3><div class="lesson-english">${esc(l.subtitle)}</div><div class="lesson-meta"><span>3 个词 · 1 句表达</span><span>听 · 玩 · 说</span></div></div></button>`).join('')}</div></section>`;
+  const visibleLessons=LESSONS.filter(l=>lessonFilter==='all'||(lessonFilter==='new'?l.group==='new':l.group!=='new')).sort((a,b)=>Number(b.group==='new')-Number(a.group==='new'));
+  return `${header(`嗨，${state.settings.name}！`,'准备好和森林朋友说 Hello 了吗？')}<section class="hero" aria-labelledby="hero-title"><div class="hero-copy"><span class="tiny-badge"><span class="mini-dot"></span> ${done?'下一站的小冒险':'今天的第一站'} · 约 5–8 分钟</span><h2 id="hero-title">森林里，<br>藏着新朋友。</h2><p>听听它们的声音，帮它们一个小忙。<br>英语，就从一句 Hello 开始。</p>${primary(done?'继续我的冒险':'出发，认识新朋友','start',`data-id="${next.id}"`)}<div class="hero-meta">${icon('heart')}不用全会，愿意试试就很棒</div></div><img class="hero-art" src="./forest.svg" alt="小狐狸和兔子在绿色森林里向你问好"></section><div class="journey-strip"><div class="journey-item"><div class="journey-icon">${icon('sound')}</div><div><strong>先听听，别着急</strong><span>声音和画面，一起认识</span></div></div><div class="journey-item"><div class="journey-icon">${icon('compass')}</div><div><strong>玩一玩，认朋友</strong><span>帮小伙伴，完成小任务</span></div></div><div class="journey-item"><div class="journey-icon">${icon('spark')}</div><div><strong>说一句，也很棒</strong><span>跟着试试，慢慢敢开口</span></div></div></div>${due.length?`<div class="review-banner"><span class="emoji" aria-hidden="true">🌿</span><div><strong>${due.length} 个老朋友想见你</strong><p>先听一听，再看看还认不认识。</p></div>${secondary('去打个招呼','begin-review')}</div>`:''}${gameSection()}<section aria-labelledby="explore-title"><div class="section-top"><div><h2 id="explore-title">沿着好奇心出发</h2><p>喜欢哪一站，就从哪一站开始。</p></div><span class="quiet">${icon('leaf')}${LESSONS.length} 个小故事 · 随心选择</span></div><div class="lesson-filters" role="group" aria-label="选择故事"><button data-action="filter-lessons" data-filter="all" aria-pressed="${lessonFilter==='all'}">全部故事</button><button data-action="filter-lessons" data-filter="new" aria-pressed="${lessonFilter==='new'}">✨ 新冒险</button><button data-action="filter-lessons" data-filter="familiar" aria-pressed="${lessonFilter==='familiar'}">熟悉的老朋友</button></div><div class="lesson-grid">${visibleLessons.map(l=>`<button class="lesson-card" data-action="start" data-id="${l.id}" aria-label="开始${esc(l.title)}，3个词和1句话"><div class="lesson-art" style="--scene:${l.color}"><span class="lesson-num">CHAPTER ${String(LESSONS.indexOf(l)+1).padStart(2,'0')}</span>${state.lessonProgress[l.id]?'<span class="lesson-done">✓ 来过这里</span>':l.group==='new'?'<span class="lesson-done new-badge">新冒险</span>':''}<span class="scene-emoji" aria-hidden="true">${l.emoji}</span><span class="scene-side" aria-hidden="true">${l.sideEmoji||'🍃'}</span></div><div class="lesson-body"><h3>${esc(l.title)}${icon('arrow')}</h3><div class="lesson-english">${esc(l.subtitle)}</div><div class="lesson-meta"><span>3 个词 · 1 句表达</span><span>听 · 玩 · 说</span></div></div></button>`).join('')}</div></section>`;
+}
+function gameSection() {
+  return `<section class="playground-section" aria-labelledby="playground-title"><div class="section-top"><div><div class="eyebrow">A LITTLE PLAY, A LITTLE DISCOVERY</div><h2 id="playground-title">森林游乐场，开门啦</h2><p>把认识的英语，放进好玩的小任务里。</p></div><span class="quiet">约 2–4 分钟 · 没有倒计时</span></div><div class="game-grid">${GAME_CONFIGS.map(g=>`<button class="game-card" data-action="start-game" data-id="${g.id}" style="--game-color:${g.color}" aria-label="玩${esc(g.title)}"><span class="game-card-art" aria-hidden="true">${g.emoji}</span><span class="game-card-copy"><span class="game-card-tag">${state.gameProgress?.[g.id]?'✓ 再来玩一次':'新玩法'}</span><strong>${esc(g.title)}</strong><small>${esc(g.subtitle)}</small><span class="game-card-link">我想玩 ${icon('arrow')}</span></span></button>`).join('')}</div></section>`;
 }
 function collectionPage() {
   const words=allWords.filter(w=>state.words[w.id]);
@@ -128,7 +141,7 @@ function reviewPage() {
 function parentPage() {
   const stats=getStats(state);
   const sessions=state.sessions.slice(-7).reverse();
-  return `${header('陪伴，比催促更有力量','这里记录尝试，也给下一次的轻松开始留一点线索。','A LITTLE CORNER FOR PARENTS')}<div class="parent-grid"><div class="stat"><span>去过的故事</span><strong>${stats.completedLessons} <small>/ 6</small></strong><small>完成体验，不代表掌握</small></div><div class="stat"><span>见过的词</span><strong>${stats.learnedWords}</strong><small>完成过找图练习</small></div><div class="stat"><span>有过探索的日子</span><strong>${stats.practicedDays}</strong><small>累计天数，没有断签惩罚</small></div></div><section class="panel"><h2>让孩子愿意再来的一件小事</h2><p>先问“今天你最喜欢哪位朋友？”，再请孩子教你一个词。可以只听、只指，或一起说一句。比起纠正每个音，先肯定他的尝试。</p><div class="notice-list"><span>一次约 5–8 分钟</span><span>允许跳过开口</span><span>不比较，不催打卡</span></div></section><section class="panel"><h2>最近的小冒险</h2>${sessions.length?sessions.map(s=>`<div class="session-row"><div>${esc(LESSONS.find(l=>l.id===s.lessonId)?.title || '轻松复习')}<br><small>${s.said?'孩子选择了“我试着说了”':'完成了这次探索；开口可下次尝试'}</small></div><time>${new Date(s.completedAt).toLocaleDateString('zh-CN',{month:'short',day:'numeric'})}</time></div>`).join(''):'<p>还没有完成的故事。先让孩子自己选一站，不必按顺序。</p>'}<p class="parent-note">开口记录来自孩子自选，未录音或评估发音；记录不等同于学习效果测评。</p></section><section class="panel"><h2>适合他的小设置</h2><form id="name-form"><label for="explorer-name">给小探险家起个名字</label><div class="form-row"><input id="explorer-name" name="name" maxlength="12" required value="${esc(state.settings.name)}" autocomplete="off"><button class="secondary-btn" type="submit">保存名字</button></div></form><div class="setting-row"><div><strong>英语读慢一点</strong><p>孩子随时可以重听，速度也可以按需要调整。</p></div><button class="switch" role="switch" aria-label="英语读慢一点" aria-checked="${!!state.settings.slowAudio}" data-action="toggle-audio"></button></div><div class="setting-row"><div><strong>检查英语声音</strong><p>${voiceWasTested?voiceProblem?'声音暂不可用，请检查系统英语语音。':'已尝试播放，请以实际听到声音为准。':'内置英语合成音频，首次使用请试听。'}</p></div>${secondary('试听 Hello','test-audio')}</div><p>听不到时：先检查音量和网络，再点一次试听。内置音频加载失败时会尝试设备英语朗读。平台不提供发音自动评分。</p></section><section class="panel"><h2>进度留在哪里？</h2><p>学习记录仅保存在当前设备的这个浏览器里，不会自动跨设备同步。清理浏览器数据或使用隐私模式可能丢失记录。平台不申请麦克风权限；优先播放本站内置合成音频；加载失败时使用系统或浏览器朗读，部分备用语音服务可能联网。</p><div class="footer-actions">${secondary('导出学习记录','export')}${secondary('查看学习依据与开源研究','research')}</div><p class="export-note">导出文件便于家长留档，当前版本暂不支持导入。</p><button class="text-btn danger-btn" data-action="ask-reset">清空这台设备的学习记录</button>${resetPending?`<div class="confirm-box"><p>清空后将重新开始，名字和设置也会重置。建议先导出留档。</p><div class="footer-actions">${secondary('取消','cancel-reset')}${secondary('确认清空','reset')}</div></div>`:''}</section>`;
+  return `${header('陪伴，比催促更有力量','这里记录尝试，也给下一次的轻松开始留一点线索。','A LITTLE CORNER FOR PARENTS')}<div class="parent-grid"><div class="stat"><span>去过的故事</span><strong>${stats.completedLessons} <small>/ ${LESSONS.length}</small></strong><small>完成体验，不代表掌握</small></div><div class="stat"><span>见过的词</span><strong>${stats.learnedWords}</strong><small>完成过找图练习</small></div><div class="stat"><span>有过探索的日子</span><strong>${stats.practicedDays}</strong><small>累计天数，没有断签惩罚</small></div></div><section class="panel"><h2>让孩子愿意再来的一件小事</h2><p>先问“今天你最喜欢哪位朋友？”，再请孩子教你一个词。可以只听、只指，或一起说一句。比起纠正每个音，先肯定他的尝试。</p><div class="notice-list"><span>一次约 5–8 分钟</span><span>允许跳过开口</span><span>不比较，不催打卡</span></div></section><section class="panel"><h2>最近的小冒险</h2><p class="parent-note">森林游乐场已体验 ${stats.completedGames} / ${GAME_CONFIGS.length} 种玩法。游戏只记录体验，不计入词汇掌握或课程完成。</p>${sessions.length?sessions.map(s=>`<div class="session-row"><div>${esc(LESSONS.find(l=>l.id===s.lessonId)?.title || '轻松复习')}<br><small>${s.said?'孩子选择了“我试着说了”':'完成了这次探索；开口可下次尝试'}</small></div><time>${new Date(s.completedAt).toLocaleDateString('zh-CN',{month:'short',day:'numeric'})}</time></div>`).join(''):'<p>还没有完成的故事。先让孩子自己选一站，不必按顺序。</p>'}<p class="parent-note">开口记录来自孩子自选，未录音或评估发音；记录不等同于学习效果测评。</p></section><section class="panel"><h2>适合他的小设置</h2><form id="name-form"><label for="explorer-name">给小探险家起个名字</label><div class="form-row"><input id="explorer-name" name="name" maxlength="12" required value="${esc(state.settings.name)}" autocomplete="off"><button class="secondary-btn" type="submit">保存名字</button></div></form><div class="setting-row"><div><strong>英语读慢一点</strong><p>孩子随时可以重听，速度也可以按需要调整。</p></div><button class="switch" role="switch" aria-label="英语读慢一点" aria-checked="${!!state.settings.slowAudio}" data-action="toggle-audio"></button></div><div class="setting-row"><div><strong>检查英语声音</strong><p>${voiceWasTested?voiceProblem?'声音暂不可用，请检查系统英语语音。':'已尝试播放，请以实际听到声音为准。':'内置英语合成音频，首次使用请试听。'}</p></div>${secondary('试听 Hello','test-audio')}</div><p>听不到时：先检查音量和网络，再点一次试听。内置音频加载失败时会尝试设备英语朗读。平台不提供发音自动评分。</p></section><section class="panel"><h2>进度留在哪里？</h2><p>学习记录仅保存在当前设备的这个浏览器里，不会自动跨设备同步。清理浏览器数据或使用隐私模式可能丢失记录。平台不申请麦克风权限；优先播放本站内置合成音频；加载失败时使用系统或浏览器朗读，部分备用语音服务可能联网。</p><div class="footer-actions">${secondary('导出学习记录','export')}${secondary('查看学习依据与开源研究','research')}</div><p class="export-note">导出文件便于家长留档，当前版本暂不支持导入。</p><button class="text-btn danger-btn" data-action="ask-reset">清空这台设备的学习记录</button>${resetPending?`<div class="confirm-box"><p>清空后将重新开始，名字和设置也会重置。建议先导出留档。</p><div class="footer-actions">${secondary('取消','cancel-reset')}${secondary('确认清空','reset')}</div></div>`:''}</section>`;
 }
 function researchPage() {
   const sources=[
@@ -145,13 +158,13 @@ function researchPage() {
 function startLesson(id) {
   const data=LESSONS.find(l=>l.id===id); if(!data)return;
   previousFocus=document.activeElement;
-  review=null;
+  review=null;game=null;
   lesson={data,step:0,quizIndex:0,quizResults:{},quizAttempts:0,quizCorrect:false,hint:false,tokens:[],phraseCorrect:false,feedback:'',said:false,saved:false,shuffled:shuffle(data.words)};
   document.body.style.overflow='hidden'; $('#app').inert=true; renderModal();
 }
 function shuffle(list) { const result=[...list]; for(let i=result.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[result[i],result[j]]=[result[j],result[i]];}return result; }
 function closeModal() {
-  cancelAudio(); lesson=null;review=null;$('#modal-root').innerHTML='';document.body.style.overflow='';$('#app').inert=false;render();previousFocus?.isConnected&&previousFocus.focus();
+  cancelAudio(); lesson=null;review=null;game=null;$('#modal-root').innerHTML='';document.body.style.overflow='';$('#app').inert=false;render();previousFocus?.isConnected&&previousFocus.focus();
   if(!previousFocus?.isConnected) $('#main')?.focus({preventScroll:true});
 }
 function modalFrame(title, emoji, body, step=0, total=5) {
@@ -165,7 +178,7 @@ function renderModal() {
   const steps=['STORY TIME','LISTEN & DISCOVER','LISTEN & FIND','MAKE A SENTENCE','GIVE IT A TRY','A LITTLE DISCOVERY'];
   let body=`<div class="step-kicker">${steps[lesson.step]}</div>`;
   if(lesson.step===0) {
-    body+=`<h2 id="adventure-heading">${esc(l.sceneTitle)}</h2><p class="step-description">${esc(l.sceneDescription)}</p><div class="story-scene ${l.id==='picnic-numbers'?'long-scene':''}" aria-hidden="true" style="background:${l.color}">${(l.id==='garden-colors'?['🌹','☀️','🍃']:l.words.map(w=>w.emoji)).map(e=>`<span>${e}</span>`).join('')}</div><div class="story-lines">${l.story.map(line=>`<div class="story-line">${speaker(line.en,'听这一句故事')}<div><strong lang="en">${esc(line.en)}</strong><small>${esc(line.zh)}</small></div></div>`).join('')}</div><div class="hint-pill">点小喇叭听故事。听不懂没关系，看看图片就好。</div><div class="adventure-footer">${primary('去认识它们','next-step')}</div>`;
+    body+=`<h2 id="adventure-heading">${esc(l.sceneTitle)}</h2><p class="step-description">${esc(l.sceneDescription)}</p><div class="story-scene ${l.id==='picnic-numbers'?'long-scene':''}" aria-hidden="true" style="background:${l.color}">${(l.storyEmojis||(l.id==='garden-colors'?['🌹','☀️','🍃']:l.words.map(w=>w.emoji))).map(e=>`<span>${e}</span>`).join('')}</div><div class="story-lines">${l.story.map(line=>`<div class="story-line">${speaker(line.en,'听这一句故事')}<div><strong lang="en">${esc(line.en)}</strong><small>${esc(line.zh)}</small></div></div>`).join('')}</div><div class="hint-pill">点小喇叭听故事。听不懂没关系，看看图片就好。</div><div class="adventure-footer">${primary('去认识它们','next-step')}</div>`;
   } else if(lesson.step===1) {
     body+=`<h2 id="adventure-heading">点一点，听它说什么</h2><p class="step-description">每个词可以多听几遍。想跟着说，也可以哦。</p><div class="teach-grid">${l.words.map(w=>`<article class="teach-card"><span class="emoji" aria-hidden="true">${w.emoji}</span><strong lang="en">${esc(w.text)}</strong><small>${esc(w.zh)}</small>${speaker(w.text,`听${w.text}的发音`)}</article>`).join('')}</div><div class="hint-pill">不用马上记住，待会儿我们一起找一找。</div><div class="adventure-footer">${primary('我来找一找','next-step')}</div>`;
   } else if(lesson.step===2) {
@@ -207,7 +220,7 @@ function finishLesson(said) {
 function beginReview(free=false) {
   let words=free?allWords.filter(w=>state.words[w.id]):getDueWords(state);
   if(!words.length){go('review');return;}
-  previousFocus=document.activeElement; lesson=null;
+  previousFocus=document.activeElement; lesson=null;game=null;
   review={words:shuffle(words).slice(0,6),index:0,revealed:false,hint:false,correct:false,attempts:0,recordedWrong:false,feedback:'',done:false,free};
   review.choices=reviewChoices(review.words[0]);
   document.body.style.overflow='hidden';$('#app').inert=true;renderReviewModal();
@@ -236,6 +249,81 @@ function reviewAnswer(id) {
   }
   renderReviewModal();
 }
+function wordById(id) { return allWords.find(w=>w.id===id); }
+function startGame(id) {
+  if(!GAME_CONFIGS.some(g=>g.id===id))return;
+  previousFocus=document.activeElement;
+  lesson=null;review=null;
+  const animalIds=shuffle(['cat','dog','bird','duck','frog','fish']).slice(0,4);
+  game={id,stage:'intro',index:0,round:id==='delivery'?createDeliveryRound(0):null,deck:id==='pairs'?createPairDeck(animalIds):[],flipped:[],matched:[],feedback:'',correct:false,hint:false,saved:false};
+  document.body.style.overflow='hidden';$('#app').inert=true;renderGame();
+}
+function gameWords() {
+  const ids=game.id==='delivery'?DELIVERY_ORDERS.map(o=>o.wordId):game.deck.map(c=>c.wordId);
+  return [...new Set(ids)].map(wordById);
+}
+function gameIntro() {
+  const delivery=game.id==='delivery';
+  return `<div class="step-kicker">LET'S PLAY TOGETHER</div><h2 id="adventure-heading">${delivery?'森林点心铺，开门啦！':'给声音，找一位图片朋友'}</h2><p class="step-description">${delivery?'小狐狸会用英语点东西。听听订单，把它想要的东西送过去。':'翻一张声音卡，听它说什么；再翻一张图片卡，看看是不是一对。'}</p><div class="game-instructions"><span aria-hidden="true">${delivery?'🦊':'🔊'}</span><p>${delivery?'先点小喇叭认识货架上的东西，再接第一张订单。':'先认识这 4 位朋友。待会儿每位朋友都有一张声音卡、一张图片卡。'}<br><strong>可以重听、可以再试，没有倒计时。</strong></p></div><div class="game-vocab ${delivery?'six-words':''}">${gameWords().map(w=>`<article class="game-vocab-word"><span aria-hidden="true">${w.emoji}</span><strong lang="en">${esc(w.text)}</strong><small>${esc(w.zh)}</small>${speaker(w.text,`先听${w.text}的声音`)}</article>`).join('')}</div><div class="adventure-footer">${primary(delivery?'准备好啦，开始送':'认识啦，去找一对','begin-game')}</div>`;
+}
+function renderDelivery() {
+  const {order,choices}=game.round;
+  const word=wordById(order.wordId);
+  return `<div class="step-kicker">FOREST DELIVERY</div><h2 id="adventure-heading">小狐狸想要什么呢？</h2><p class="step-description">听听它的订单，再点货架上的东西送过去。</p><div class="delivery-scene"><div class="delivery-fox" aria-hidden="true">🦊<small>点心铺的小客人</small></div><div class="order-bubble"><button class="listen-button" data-speak="${esc(order.request)}" aria-label="听小狐狸的订单">${icon('sound')}听订单</button><button class="text-btn" data-action="delivery-hint">${game.hint?`${esc(order.request)}<br>${esc(order.zhHint)}`:'想看一点提示'}</button></div><div class="delivery-parcel ${game.correct?'arrived':''}" aria-label="${game.correct?'已经送到了':'等待送达'}"><span aria-hidden="true">${game.correct?word.emoji:'🧺'}</span><small>${game.correct?'送到啦！':'等你来送'}</small></div></div>${audioNotice()}<div class="delivery-shelf" aria-label="可以送的东西">${choices.map(id=>{const w=wordById(id);return `<div class="delivery-item"><button class="delivery-choice ${game.correct&&id===word.id?'is-correct':''}" data-action="deliver-word" data-id="${id}" aria-label="送${esc(w.zh)}" ${game.correct?'disabled':''}><span aria-hidden="true">${w.emoji}</span>${game.correct&&id===word.id?`<strong lang="en">${esc(w.text)}</strong>`:''}</button>${speaker(w.text,`听货架上${esc(w.zh)}的英语`)}</div>`;}).join('')}</div><div class="feedback ${game.feedback&&!game.correct?'try-again':''}" role="status">${esc(game.feedback)}</div><div class="adventure-footer">${game.correct?primary(game.index===DELIVERY_ORDERS.length-1?'小任务完成啦':'再接一张订单','next-delivery'):''}</div><p class="quiet-note">第 ${game.index+1} 张订单 / ${DELIVERY_ORDERS.length} · 想休息时，点右上角回森林。</p>`;
+}
+function renderPairs() {
+  const complete=game.matched.length===game.deck.length;
+  return `<div class="step-kicker">SOUNDS MEET PICTURES</div><h2 id="adventure-heading">声音和图片，谁是一对？</h2><p class="step-description">一张带小喇叭，一张藏着图片。声音卡可以点着重听。</p><div class="pairs-legend"><span>${icon('sound')} 声音卡</span><span>🌿 图片卡</span><strong>找到 ${game.matched.length/2} / 4 对</strong></div>${audioNotice()}<div class="pair-grid" aria-label="声音图片配对卡">${game.deck.map((card,i)=>{
+    const w=wordById(card.wordId),matched=game.matched.includes(card.id),open=matched||game.flipped.includes(card.id),sound=card.kind==='sound';
+    const label=matched?`已经配对的${w.zh}，点击再听`:open&&!sound?`翻开的${w.zh}图片`:`第${i+1}张${sound?'声音卡，点击听声音':'图片卡，点击翻开'}`;
+    return `<button class="pair-card ${sound?'sound-card':'picture-card'} ${open?'revealed':''} ${matched?'matched':''}" data-action="flip-pair" data-id="${card.id}" aria-label="${esc(label)}" aria-pressed="${open}" ${game.flipped.length===2&&!game.flipped.includes(card.id)&&!matched?'disabled':''}>${sound?icon('sound'):`<span class="pair-picture" aria-hidden="true">${open?w.emoji:'🌿'}</span>`}<small>${matched?esc(w.text):sound?open?game.hint?`${esc(w.text)} · ${esc(w.zh)}`:'点我再听':'听听声音':open?'看看图片':'翻开图片'}</small>${matched?'<span class="pair-check" aria-hidden="true">✓</span>':''}</button>`;
+  }).join('')}</div><div class="feedback ${game.feedback&&!game.correct?'try-again':''}" role="status">${esc(game.feedback||'慢慢翻，不用记次数。')}</div><button class="text-btn" data-action="pairs-hint">${game.hint?'翻开的声音卡会显示词语':'看看词语提示'}</button><div class="adventure-footer">${game.flipped.length===2?primary(complete?'看看我的发现':game.correct?'再找一对':'再试一对',complete?'finish-game':'reset-pair'):''}</div>`;
+}
+function renderGame({focusCard=null}={}) {
+  cancelAudio();if(!game)return;
+  const config=GAME_CONFIGS.find(g=>g.id===game.id);
+  const delivery=game.id==='delivery';
+  let body;
+  if(game.stage==='intro')body=gameIntro();
+  else if(game.stage==='done')body=`<div class="success-medal" aria-hidden="true">${delivery?'🧺':'🌼'}</div><div class="step-kicker">A LITTLE PLAY, A LITTLE DISCOVERY</div><h2 id="adventure-heading">${delivery?'森林点心，送到啦！':'声音和图片，都找到朋友啦！'}</h2><p class="step-description">${delivery?'你完成了 6 张小订单，帮小狐狸找到了想要的东西。':'你把 4 位朋友的声音和图片连在了一起。'}<br>这些声音，可以慢慢变熟悉。</p><div class="summary-words">${gameWords().map(w=>`<button class="summary-word" data-speak="${esc(w.text)}" aria-label="再听${esc(w.text)}"><span aria-hidden="true">${w.emoji}</span>${esc(w.text)} ${icon('sound')}</button>`).join('')}</div>${!storageOk?'<div class="warning">这次体验暂时没有保存，请让家长检查浏览器存储设置。</div>':''}<div class="adventure-footer">${primary('回森林，休息一下','close-modal')}${secondary('我还想再玩一小轮','replay-game')}</div><p class="quiet-note">没有分数和排名。今天愿意听、愿意试，就很棒。</p>`;
+  else body=delivery?renderDelivery():renderPairs();
+  const total=delivery?DELIVERY_ORDERS.length:4;
+  const step=game.stage==='done'?total:game.stage==='intro'?0:delivery?game.index:Math.min(3,game.matched.length/2);
+  $('#modal-root').innerHTML=modalFrame(config.title,config.emoji,body,step,total);
+  if(focusCard)$(`[data-action="flip-pair"][data-id="${focusCard}"]`)?.focus({preventScroll:true});else focusModal();
+}
+function deliverWord(id) {
+  if(!game||game.id!=='delivery'||game.stage!=='play'||game.correct)return;
+  const order=game.round.order;
+  if(!game.round.choices.includes(id))return;
+  game.correct=id===order.wordId;
+  game.feedback=game.correct?`送到啦！${wordById(id).text}，${wordById(id).zh}。小狐狸说谢谢你！`:'小狐狸想要另一样东西。再听听订单，也可以看一点提示。';
+  renderGame();
+  if(game.correct)speak(order.enFeedback,$('.delivery-parcel'));
+}
+function flipPair(id) {
+  if(!game||game.id!=='pairs'||game.stage!=='play')return;
+  const card=game.deck.find(c=>c.id===id);if(!card)return;
+  if(game.matched.includes(id)||game.flipped.includes(id)){if(card.kind==='sound'||game.matched.includes(id))speak(wordById(card.wordId).text,$(`[data-action="flip-pair"][data-id="${id}"]`));return;}
+  if(game.flipped.length===2)return;
+  game.flipped.push(id);game.feedback=card.kind==='sound'?'听到了吗？再找一张图片卡。':'看看是哪位朋友，再找一张声音卡。';
+  game.correct=false;
+  if(game.flipped.length===2){
+    const [first,second]=game.flipped.map(key=>game.deck.find(c=>c.id===key));
+    game.correct=evaluatePair(first,second);
+    if(game.correct){game.matched.push(...game.flipped);game.feedback=`找到一对！${wordById(card.wordId).text}，${wordById(card.wordId).zh}。`;}
+    else if(first.kind===second.kind)game.feedback='一张声音卡，要和一张图片卡成为一对。再试试吧。';
+    else {const sound=first.kind==='sound'?first:second;game.feedback=`声音说的是“${wordById(sound.wordId).zh}”。可以重听，再找找它的图片。`;}
+  }
+  renderGame({focusCard:id});
+  if(card.kind==='sound')speak(wordById(card.wordId).text,$(`[data-action="flip-pair"][data-id="${id}"]`));
+}
+function finishGame() {
+  if(!game||game.saved||game.stage!=='play')return;
+  const complete=game.id==='delivery'?game.correct&&game.index===DELIVERY_ORDERS.length-1:game.matched.length===game.deck.length;
+  if(!complete)return;
+  state=completeGame(state,game.id,new Date());game.saved=true;persist();game.stage='done';renderGame();
+}
 function exportRecords() {
   const blob=new Blob([JSON.stringify({app:'森语探险',exportedAt:new Date().toISOString(),state},null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`little-english-${new Date().toISOString().slice(0,10)}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('学习记录已导出，请检查浏览器下载列表。');
@@ -246,6 +334,17 @@ document.addEventListener('click', event => {
   if(button.dataset.speak){speak(button.dataset.speak,button);return;}
   const action=button.dataset.action;
   if(action==='start')startLesson(button.dataset.id);
+  else if(action==='filter-lessons'){lessonFilter=button.dataset.filter;render();$(`[data-action="filter-lessons"][data-filter="${lessonFilter}"]`)?.focus({preventScroll:true});}
+  else if(action==='start-game')startGame(button.dataset.id);
+  else if(action==='begin-game'&&game){game.stage='play';renderGame();}
+  else if(action==='delivery-hint'&&game){game.hint=true;renderGame();}
+  else if(action==='deliver-word')deliverWord(button.dataset.id);
+  else if(action==='next-delivery'&&game?.id==='delivery'&&game.correct){if(game.index===DELIVERY_ORDERS.length-1)finishGame();else {game.index++;game.round=createDeliveryRound(game.index);game.correct=false;game.hint=false;game.feedback='';renderGame();}}
+  else if(action==='pairs-hint'&&game?.id==='pairs'){game.hint=true;renderGame();}
+  else if(action==='flip-pair')flipPair(button.dataset.id);
+  else if(action==='reset-pair'&&game?.id==='pairs'){game.flipped=[];game.correct=false;game.feedback='';renderGame();}
+  else if(action==='finish-game')finishGame();
+  else if(action==='replay-game'&&game)startGame(game.id);
   else if(action==='go-home')go('home');
   else if(action==='research')go('research');
   else if(action==='close-modal')closeModal();
@@ -276,7 +375,7 @@ document.addEventListener('submit',event=>{
   state.settings.name=name;persist();render();toast('名字保存好了。');
 });
 document.addEventListener('keydown',event=>{
-  if(!lesson&&!review)return;
+  if(!lesson&&!review&&!game)return;
   if(event.key==='Escape'){event.preventDefault();closeModal();return;}
   if(event.key==='Tab'){
     const nodes=[...$('#modal-root').querySelectorAll('button:not(:disabled),a[href],input:not(:disabled),[tabindex="0"]')].filter(el=>el.getClientRects().length);
