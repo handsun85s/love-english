@@ -118,6 +118,77 @@ export function saveState(storage, state) {
   }
 }
 
+// A tab only writes over the exact save it read. A second tab, a broken save,
+// or an unsupported version must never be silently replaced with a fresh one.
+export function openStorageSession(storage) {
+  const messages = {
+    invalid: '原来的学习记录暂时无法读取，已保留原记录并暂停保存。请家长先到家长小站导出原记录留档，再确认清空重新开始；导出文件目前不能导入。',
+    conflict: '另一个页面更新了学习记录。为保护原记录，这个页面的新进度暂时没有保存；请让家长先导出本页记录，再刷新页面。',
+    unavailable: '浏览器暂时无法保存进度。请让家长检查浏览器的存储设置。',
+  };
+  let raw = null, state = createInitialState(), problem = '';
+  try {
+    raw = storage.getItem(STORAGE_KEY);
+    if (raw !== null) {
+      const input = JSON.parse(raw);
+      const object = value => value && typeof value === 'object' && !Array.isArray(value);
+      const validEntries = (value, ids, dateField) => value === undefined || (object(value) && Object.entries(value).every(([id, entry]) => ids.has(id) && object(entry) && validDate(entry[dateField])));
+      if (!object(input) || input.version !== 1 ||
+          !validEntries(input.lessonProgress, LESSON_IDS, 'completedAt') ||
+          !validEntries(input.words, WORD_IDS, 'dueAt') ||
+          !validEntries(input.gameProgress, GAME_IDS, 'completedAt') ||
+          (input.settings !== undefined && !object(input.settings)) ||
+          (input.sessions !== undefined && (!Array.isArray(input.sessions) || input.sessions.some(s => !object(s) || !LESSON_IDS.has(s.lessonId) || !validDate(s.completedAt)))) ||
+          (input.activityDays !== undefined && (!Array.isArray(input.activityDays) || input.activityDays.some(d => typeof d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d) || !validDate(`${d}T12:00:00`))))) {
+        problem = 'invalid';
+      } else state = normalizeState(input);
+    }
+  } catch {
+    // Distinguish unreadable JSON from blocked browser storage.
+    problem = raw === null ? 'unavailable' : 'invalid';
+  }
+  let invalidBackup = problem === 'invalid' ? raw : null;
+  return {
+    state,
+    get error() { return problem ? messages[problem] : ''; },
+    get rawBackup() { return invalidBackup; },
+    // Called only after the parent explicitly confirms clearing the record.
+    // Recheck the original bytes so a newer tab's record cannot be erased.
+    resetInvalid() {
+      if (problem !== 'invalid') return { ok: false, error: messages[problem] || messages.unavailable };
+      try {
+        if (storage.getItem(STORAGE_KEY) !== raw) {
+          problem = 'conflict';
+          return { ok: false, error: messages.conflict };
+        }
+        const serialized = JSON.stringify(createInitialState());
+        storage.setItem(STORAGE_KEY, serialized);
+        raw = serialized;
+        problem = '';
+        invalidBackup = null;
+        return { ok: true };
+      } catch {
+        return { ok: false, error: messages.unavailable };
+      }
+    },
+    save(next) {
+      if (problem) return { ok: false, error: messages[problem] };
+      try {
+        if (storage.getItem(STORAGE_KEY) !== raw) {
+          problem = 'conflict';
+          return { ok: false, error: messages[problem] };
+        }
+        const serialized = JSON.stringify(normalizeState(next));
+        storage.setItem(STORAGE_KEY, serialized);
+        raw = serialized;
+        return { ok: true };
+      } catch {
+        return { ok: false, error: messages.unavailable };
+      }
+    },
+  };
+}
+
 function dueDate(now, days) {
   const date = asDate(now);
   if (days === 0) return date.toISOString();

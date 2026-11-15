@@ -1,7 +1,7 @@
 import { LESSONS } from './content.js?v=20261103-fun';
 import { AUDIO_FILES } from './audio-map.js?v=20261103-fun';
 import { GAME_CONFIGS, DELIVERY_ORDERS, createDeliveryRound, createPairDeck, evaluatePair } from './playground.js?v=20261103-fun';
-import { createInitialState, loadState, saveState, completeLesson, completeGame, getDueWords, recordReview, getStats } from './engine.js?v=20261103-fun';
+import { createInitialState, openStorageSession, completeLesson, completeGame, getDueWords, recordReview, getStats } from './engine.js?v=20261115-storage';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -25,14 +25,16 @@ const secondary = (label, action, attrs='') => `<button class="secondary-btn" da
 const speaker = (text, label='听一听', cls='speaker-btn') => `<button class="${cls}" data-speak="${esc(text)}" aria-label="${esc(label)}">${icon('sound')}</button>`;
 let storage;
 try { storage = window.localStorage; } catch { storage = { getItem(){return null;}, setItem(){throw new Error('Storage unavailable');} }; }
-let state = loadState(storage);
+const storageSession = openStorageSession(storage);
+let state = storageSession.state;
 let page = 'home';
 let lesson = null;
 let review = null;
 let game = null;
 let lessonFilter = 'all';
 let exitPromptOpen = false;
-let storageOk = true;
+let storageMessage = storageSession.error;
+let storageOk = !storageMessage;
 let resetPending = false;
 let voiceProblem = '';
 let voiceWasTested = false;
@@ -44,9 +46,10 @@ let activeAudio;
 const allWords = LESSONS.flatMap(l => l.words.map(w => ({...w, lessonId:l.id})));
 
 function persist() {
-  const result = saveState(storage, state);
+  const result = storageSession.save(state);
   storageOk = result.ok;
-  if (!storageOk) toast('这次进步暂时只能保留到页面关闭。请让家长检查浏览器的存储设置。');
+  storageMessage = result.error || '';
+  if (!storageOk) toast(storageMessage);
   return result.ok;
 }
 function toast(message) {
@@ -118,7 +121,7 @@ function header(title, description, kicker='A LITTLE ENGLISH, A LITTLE WONDER') 
 function render() {
   const due = getDueWords(state);
   const labels={home:'去探险',collection:'我的发现',review:'轻松复习',parent:'家长小站',research:'设计依据'};
-  $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><a class="brand" href="#" data-page="home" aria-label="森语探险首页"><img src="./favicon.svg" class="brand-mark" alt=""><div><strong>森语探险</strong><small>Little English</small></div></a><div class="nav-label">我的森林 / MY FOREST</div><nav class="nav" aria-label="主导航">${[['home','compass','去探险'],['collection','leaf','我的发现'],['review','repeat','轻松复习']].map(([id,ic,label])=>`<button class="nav-btn ${page===id?'active':''}" data-page="${id}" ${page===id?'aria-current="page"':''} aria-label="${label}">${icon(ic)}<span class="nav-text">${label}</span>${id==='review'&&due.length?'<span class="nav-dot"></span>':''}</button>`).join('')}</nav><div class="sidebar-note"><span class="sprout" aria-hidden="true">🌱</span><p><strong>每一棵大树，</strong>都从小小的芽开始。<br>今天的一点点，也很棒。</p></div><div class="sidebar-foot"><button class="nav-btn ${page==='parent'||page==='research'?'active':''}" data-page="parent">${icon('parent')}家长小站</button></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb">我的森林 <span>/</span><b>${labels[page]}</b></div><div class="top-actions"><div class="calm-pill">${icon('leaf')}慢慢来，每天一点点</div><button class="text-btn mobile-parent" data-page="parent" aria-label="家长小站">${icon('parent')}</button><div class="avatar" title="小小探险家" aria-hidden="true">🦊</div></div></header><main id="main" tabindex="-1">${!storageOk?'<div class="warning" role="status">浏览器暂时无法保存进度。可以继续玩，关闭页面后本次记录可能会丢失；请让家长检查存储设置。</div>':''}${({home:homePage,collection:collectionPage,review:reviewPage,parent:parentPage,research:researchPage}[page]||homePage)()}</main><footer class="bottom-note"><span>森语探险 · 把好奇心，变成学习的开始。</span><button class="text-btn" data-page="research">学习设计与来源 ${icon('arrow')}</button></footer></div></div>`;
+  $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><a class="brand" href="#" data-page="home" aria-label="森语探险首页"><img src="./favicon.svg" class="brand-mark" alt=""><div><strong>森语探险</strong><small>Little English</small></div></a><div class="nav-label">我的森林 / MY FOREST</div><nav class="nav" aria-label="主导航">${[['home','compass','去探险'],['collection','leaf','我的发现'],['review','repeat','轻松复习']].map(([id,ic,label])=>`<button class="nav-btn ${page===id?'active':''}" data-page="${id}" ${page===id?'aria-current="page"':''} aria-label="${label}">${icon(ic)}<span class="nav-text">${label}</span>${id==='review'&&due.length?'<span class="nav-dot"></span>':''}</button>`).join('')}</nav><div class="sidebar-note"><span class="sprout" aria-hidden="true">🌱</span><p><strong>每一棵大树，</strong>都从小小的芽开始。<br>今天的一点点，也很棒。</p></div><div class="sidebar-foot"><button class="nav-btn ${page==='parent'||page==='research'?'active':''}" data-page="parent">${icon('parent')}家长小站</button></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb">我的森林 <span>/</span><b>${labels[page]}</b></div><div class="top-actions"><div class="calm-pill">${icon('leaf')}慢慢来，每天一点点</div><button class="text-btn mobile-parent" data-page="parent" aria-label="家长小站">${icon('parent')}</button><div class="avatar" title="小小探险家" aria-hidden="true">🦊</div></div></header><main id="main" tabindex="-1">${!storageOk?`<div class="warning" role="status">${esc(storageMessage)}</div>`:''}${({home:homePage,collection:collectionPage,review:reviewPage,parent:parentPage,research:researchPage}[page]||homePage)()}</main><footer class="bottom-note"><span>森语探险 · 把好奇心，变成学习的开始。</span><button class="text-btn" data-page="research">学习设计与来源 ${icon('arrow')}</button></footer></div></div>`;
 }
 function homePage() {
   const next = LESSONS.find(l => !state.lessonProgress[l.id]) || LESSONS[0];
@@ -143,7 +146,7 @@ function reviewPage() {
 function parentPage() {
   const stats=getStats(state);
   const sessions=state.sessions.slice(-7).reverse();
-  return `${header('陪伴，比催促更有力量','这里记录尝试，也给下一次的轻松开始留一点线索。','A LITTLE CORNER FOR PARENTS')}<div class="parent-grid"><div class="stat"><span>去过的故事</span><strong>${stats.completedLessons} <small>/ ${LESSONS.length}</small></strong><small>完成体验，不代表掌握</small></div><div class="stat"><span>见过的词</span><strong>${stats.learnedWords}</strong><small>完成过找图练习</small></div><div class="stat"><span>有过探索的日子</span><strong>${stats.practicedDays}</strong><small>累计天数，没有断签惩罚</small></div></div><section class="panel"><h2>让孩子愿意再来的一件小事</h2><p>先问“今天你最喜欢哪位朋友？”，再请孩子教你一个词。可以只听、只指，或一起说一句。比起纠正每个音，先肯定他的尝试。</p><div class="notice-list"><span>一次约 5–8 分钟</span><span>允许跳过开口</span><span>不比较，不催打卡</span></div></section><section class="panel"><h2>最近的小冒险</h2><p class="parent-note">森林游乐场已体验 ${stats.completedGames} / ${GAME_CONFIGS.length} 种玩法。游戏只记录体验，不计入词汇掌握或课程完成。</p>${sessions.length?sessions.map(s=>`<div class="session-row"><div>${esc(LESSONS.find(l=>l.id===s.lessonId)?.title || '轻松复习')}<br><small>${s.said?'孩子选择了“我试着说了”':'完成了这次探索；开口可下次尝试'}</small></div><time>${new Date(s.completedAt).toLocaleDateString('zh-CN',{month:'short',day:'numeric'})}</time></div>`).join(''):'<p>还没有完成的故事。先让孩子自己选一站，不必按顺序。</p>'}<p class="parent-note">开口记录来自孩子自选，未录音或评估发音；记录不等同于学习效果测评。</p></section><section class="panel"><h2>适合他的小设置</h2><form id="name-form"><label for="explorer-name">给小探险家起个名字</label><div class="form-row"><input id="explorer-name" name="name" maxlength="12" required value="${esc(state.settings.name)}" autocomplete="off"><button class="secondary-btn" type="submit">保存名字</button></div></form><div class="setting-row"><div><strong>英语读慢一点</strong><p>孩子随时可以重听，速度也可以按需要调整。</p></div><button class="switch" role="switch" aria-label="英语读慢一点" aria-checked="${!!state.settings.slowAudio}" data-action="toggle-audio"></button></div><div class="setting-row"><div><strong>检查英语声音</strong><p>${voiceWasTested?voiceProblem?'声音暂不可用，请检查系统英语语音。':'已尝试播放，请以实际听到声音为准。':'内置英语合成音频，首次使用请试听。'}</p></div>${secondary('试听 Hello','test-audio')}</div><p>听不到时：先检查音量和网络，再点一次试听。内置音频加载失败时会尝试设备英语朗读。平台不提供发音自动评分。</p></section><section class="panel"><h2>进度留在哪里？</h2><p>学习记录仅保存在当前设备的这个浏览器里，不会自动跨设备同步。清理浏览器数据或使用隐私模式可能丢失记录。平台不申请麦克风权限；优先播放本站内置合成音频；加载失败时使用系统或浏览器朗读，部分备用语音服务可能联网。</p><div class="footer-actions">${secondary('导出学习记录','export')}${secondary('查看学习依据与开源研究','research')}</div><p class="export-note">导出文件便于家长留档，当前版本暂不支持导入。</p><button class="text-btn danger-btn" data-action="ask-reset">清空这台设备的学习记录</button>${resetPending?`<div class="confirm-box"><p>清空后将重新开始，名字和设置也会重置。建议先导出留档。</p><div class="footer-actions">${secondary('取消','cancel-reset')}${secondary('确认清空','reset')}</div></div>`:''}</section>`;
+  return `${header('陪伴，比催促更有力量','这里记录尝试，也给下一次的轻松开始留一点线索。','A LITTLE CORNER FOR PARENTS')}<div class="parent-grid"><div class="stat"><span>去过的故事</span><strong>${stats.completedLessons} <small>/ ${LESSONS.length}</small></strong><small>完成体验，不代表掌握</small></div><div class="stat"><span>见过的词</span><strong>${stats.learnedWords}</strong><small>完成过找图练习</small></div><div class="stat"><span>有过探索的日子</span><strong>${stats.practicedDays}</strong><small>累计天数，没有断签惩罚</small></div></div><section class="panel"><h2>让孩子愿意再来的一件小事</h2><p>先问“今天你最喜欢哪位朋友？”，再请孩子教你一个词。可以只听、只指，或一起说一句。比起纠正每个音，先肯定他的尝试。</p><div class="notice-list"><span>一次约 5–8 分钟</span><span>允许跳过开口</span><span>不比较，不催打卡</span></div></section><section class="panel"><h2>最近的小冒险</h2><p class="parent-note">森林游乐场已体验 ${stats.completedGames} / ${GAME_CONFIGS.length} 种玩法。游戏只记录体验，不计入词汇掌握或课程完成。</p>${sessions.length?sessions.map(s=>`<div class="session-row"><div>${esc(LESSONS.find(l=>l.id===s.lessonId)?.title || '轻松复习')}<br><small>${s.said?'孩子选择了“我试着说了”':'完成了这次探索；开口可下次尝试'}</small></div><time>${new Date(s.completedAt).toLocaleDateString('zh-CN',{month:'short',day:'numeric'})}</time></div>`).join(''):'<p>还没有完成的故事。先让孩子自己选一站，不必按顺序。</p>'}<p class="parent-note">开口记录来自孩子自选，未录音或评估发音；记录不等同于学习效果测评。</p></section><section class="panel"><h2>适合他的小设置</h2><form id="name-form"><label for="explorer-name">给小探险家起个名字</label><div class="form-row"><input id="explorer-name" name="name" maxlength="12" required value="${esc(state.settings.name)}" autocomplete="off"><button class="secondary-btn" type="submit">保存名字</button></div></form><div class="setting-row"><div><strong>英语读慢一点</strong><p>孩子随时可以重听，速度也可以按需要调整。</p></div><button class="switch" role="switch" aria-label="英语读慢一点" aria-checked="${!!state.settings.slowAudio}" data-action="toggle-audio"></button></div><div class="setting-row"><div><strong>检查英语声音</strong><p>${voiceWasTested?voiceProblem?'声音暂不可用，请检查系统英语语音。':'已尝试播放，请以实际听到声音为准。':'内置英语合成音频，首次使用请试听。'}</p></div>${secondary('试听 Hello','test-audio')}</div><p>听不到时：先检查音量和网络，再点一次试听。内置音频加载失败时会尝试设备英语朗读。平台不提供发音自动评分。</p></section><section class="panel"><h2>进度留在哪里？</h2><p>学习记录仅保存在当前设备的这个浏览器里，不会自动跨设备同步。清理浏览器数据或使用隐私模式可能丢失记录。平台不申请麦克风权限；优先播放本站内置合成音频；加载失败时使用系统或浏览器朗读，部分备用语音服务可能联网。</p><div class="footer-actions">${secondary('导出学习记录','export')}${secondary('查看学习依据与开源研究','research')}</div><p class="export-note">导出文件便于家长留档，当前版本暂不支持导入。</p><button class="text-btn danger-btn" data-action="ask-reset">清空这台设备的学习记录</button>${resetPending?`<div class="confirm-box"><p>${storageSession.rawBackup!==null?'原记录无法读取，请先导出原记录留档（目前不能导入）。确认清空后将重新开始。':'清空后将重新开始，名字和设置也会重置。建议先导出留档。'}</p><div class="footer-actions">${secondary('取消','cancel-reset')}${secondary('确认清空','reset')}</div></div>`:''}</section>`;
 }
 function researchPage() {
   const sources=[
@@ -234,7 +237,7 @@ function renderModal({preserve=false}={}) {
   } else if(lesson.step===4) {
     body+=`<h2 id="adventure-heading">轮到你了，轻轻说一句</h2><p class="step-description">可以跟着声音说，也可以只说一个喜欢的词。</p><div class="speech-example"><span class="phrase-picture" aria-hidden="true">${l.emoji}</span><strong lang="en">${esc(l.phrase.en)}</strong><small>${esc(l.phrase.zh)}</small>${speaker(l.phrase.en,'听一句，跟着试试')}</div><div class="movement"><span class="emoji" aria-hidden="true">🍃</span><div><strong>离开屏幕，也能玩一下</strong><p>${esc(l.movement.zh)}</p></div></div><div class="adventure-footer">${primary('我试着说了！','finish-lesson','data-said="true"')}${secondary('今天先听到这里','finish-lesson','data-said="false"')}</div><p class="quiet-note">不开麦，不录音。你愿意试试，就很棒。</p>`;
   } else {
-    body+=`<div class="success-medal" aria-hidden="true">🌿</div><h2 id="adventure-heading">又多了一个小小发现！</h2><p class="step-description">今天，你和这 3 个词打过了招呼。<br>${lesson.said?'还试着说了英语，勇敢迈出一小步。':'先听一听也很棒。想说的时候，再试试看。'}</p><div class="summary-words">${l.words.map(w=>`<button class="summary-word" data-speak="${esc(w.text)}" aria-label="再听一次${esc(w.text)}"><span aria-hidden="true">${w.emoji}</span>${esc(w.text)} ${icon('sound')}</button>`).join('')}</div><div class="movement"><span class="emoji" aria-hidden="true">☀️</span><div><strong>把这个小发现，带到生活里</strong><p>${esc(l.movement.zh)}</p></div></div>${!storageOk?'<div class="warning storage-warning">进步暂时没有保存到浏览器，请让家长帮忙检查存储设置。</div>':''}<div class="adventure-footer">${primary('回森林，休息一下','close-modal')}</div><p class="quiet-note">过几天，老朋友还会回来和你打招呼。</p>`;
+    body+=`<div class="success-medal" aria-hidden="true">🌿</div><h2 id="adventure-heading">又多了一个小小发现！</h2><p class="step-description">今天，你和这 3 个词打过了招呼。<br>${lesson.said?'还试着说了英语，勇敢迈出一小步。':'先听一听也很棒。想说的时候，再试试看。'}</p><div class="summary-words">${l.words.map(w=>`<button class="summary-word" data-speak="${esc(w.text)}" aria-label="再听一次${esc(w.text)}"><span aria-hidden="true">${w.emoji}</span>${esc(w.text)} ${icon('sound')}</button>`).join('')}</div><div class="movement"><span class="emoji" aria-hidden="true">☀️</span><div><strong>把这个小发现，带到生活里</strong><p>${esc(l.movement.zh)}</p></div></div>${!storageOk?`<div class="warning storage-warning" role="status">${esc(storageMessage)}</div>`:''}<div class="adventure-footer">${primary('回森林，休息一下','close-modal')}</div><p class="quiet-note">过几天，老朋友还会回来和你打招呼。</p>`;
   }
   $('#modal-root').innerHTML=modalFrame(l.title,l.emoji,body,lesson.step);
   if(snapshot)restoreInteraction(snapshot);else focusModal();
@@ -283,7 +286,7 @@ function renderReviewModal({preserve=false}={}) {
   cancelAudio();
   if(!review)return;
   let body;
-  if(review.done) body=`<div class="success-medal" aria-hidden="true">🍃</div><h2 id="adventure-heading">又见面，真好！</h2><p class="step-description">刚刚和 ${review.words.length} 个老朋友打了招呼。<br>忘了也可以再认识一次，今天先休息一下吧。</p>${!storageOk?'<div class="warning">本次记录暂未保存，请让家长检查浏览器存储设置。</div>':''}<div class="adventure-footer">${primary('回到森林','close-modal')}</div>`;
+  if(review.done) body=`<div class="success-medal" aria-hidden="true">🍃</div><h2 id="adventure-heading">又见面，真好！</h2><p class="step-description">刚刚和 ${review.words.length} 个老朋友打了招呼。<br>忘了也可以再认识一次，今天先休息一下吧。</p>${!storageOk?`<div class="warning" role="status">${esc(storageMessage)}</div>`:''}<div class="adventure-footer">${primary('回到森林','close-modal')}</div>`;
   else {
     const w=review.words[review.index];
     body=`<div class="step-kicker">HELLO AGAIN</div><h2 id="adventure-heading">你还认得这位朋友吗？</h2><p class="step-description">先听声音，再点图。想不起来可以看提示。</p><div class="review-top">第 ${review.index+1} 个 / ${review.words.length} 个朋友</div><button class="listen-button" data-speak="${esc(w.text)}" aria-label="播放复习题目声音">${icon('sound')}听一听</button><button class="text-btn" data-action="review-hint">${review.hint?`${esc(w.text)} · ${esc(w.zh)}`:'看文字提示'}</button>${audioNotice()}<div class="choices">${review.choices.map(o=>`<button class="choice ${review.correct&&o.id===w.id?'is-correct':''}" data-action="review-answer" data-id="${o.id}" ${review.correct?'disabled':''} aria-label="${esc(o.zh)}"><span class="emoji" aria-hidden="true">${o.emoji}</span>${review.correct&&o.id===w.id?`<small>${esc(w.text)}</small>`:''}</button>`).join('')}</div><div class="feedback ${review.feedback&&!review.correct?'try-again':''}" role="status">${esc(review.feedback)}</div><div class="adventure-footer">${review.correct?primary(review.index===review.words.length-1?'今天先到这里':'再见一个朋友','next-review'):''}</div>`;
@@ -339,7 +342,7 @@ function renderGame({focusCard=null,preserve=false}={}) {
   const delivery=game.id==='delivery';
   let body;
   if(game.stage==='intro')body=gameIntro();
-  else if(game.stage==='done')body=`<div class="success-medal" aria-hidden="true">${delivery?'🧺':'🌼'}</div><div class="step-kicker">A LITTLE PLAY, A LITTLE DISCOVERY</div><h2 id="adventure-heading">${delivery?'森林点心，送到啦！':'声音和图片，都找到朋友啦！'}</h2><p class="step-description">${delivery?'你完成了 6 张小订单，帮小狐狸找到了想要的东西。':'你把 4 位朋友的声音和图片连在了一起。'}<br>这些声音，可以慢慢变熟悉。</p><div class="summary-words">${gameWords().map(w=>`<button class="summary-word" data-speak="${esc(w.text)}" aria-label="再听${esc(w.text)}"><span aria-hidden="true">${w.emoji}</span>${esc(w.text)} ${icon('sound')}</button>`).join('')}</div>${!storageOk?'<div class="warning">这次体验暂时没有保存，请让家长检查浏览器存储设置。</div>':''}<div class="adventure-footer">${primary('回森林，休息一下','close-modal')}${secondary('我还想再玩一小轮','replay-game')}</div><p class="quiet-note">没有分数和排名。今天愿意听、愿意试，就很棒。</p>`;
+  else if(game.stage==='done')body=`<div class="success-medal" aria-hidden="true">${delivery?'🧺':'🌼'}</div><div class="step-kicker">A LITTLE PLAY, A LITTLE DISCOVERY</div><h2 id="adventure-heading">${delivery?'森林点心，送到啦！':'声音和图片，都找到朋友啦！'}</h2><p class="step-description">${delivery?'你完成了 6 张小订单，帮小狐狸找到了想要的东西。':'你把 4 位朋友的声音和图片连在了一起。'}<br>这些声音，可以慢慢变熟悉。</p><div class="summary-words">${gameWords().map(w=>`<button class="summary-word" data-speak="${esc(w.text)}" aria-label="再听${esc(w.text)}"><span aria-hidden="true">${w.emoji}</span>${esc(w.text)} ${icon('sound')}</button>`).join('')}</div>${!storageOk?`<div class="warning" role="status">${esc(storageMessage)}</div>`:''}<div class="adventure-footer">${primary('回森林，休息一下','close-modal')}${secondary('我还想再玩一小轮','replay-game')}</div><p class="quiet-note">没有分数和排名。今天愿意听、愿意试，就很棒。</p>`;
   else body=delivery?renderDelivery():renderPairs();
   const total=delivery?DELIVERY_ORDERS.length:4;
   const step=game.stage==='done'?total:game.stage==='intro'?0:delivery?game.index:Math.min(3,game.matched.length/2);
@@ -380,7 +383,8 @@ function finishGame() {
   state=completeGame(state,game.id,new Date());game.saved=true;persist();game.stage='done';renderGame();
 }
 function exportRecords() {
-  const blob=new Blob([JSON.stringify({app:'森语探险',exportedAt:new Date().toISOString(),state},null,2)],{type:'application/json'});
+  const backup=storageSession.rawBackup;
+  const blob=new Blob([backup ?? JSON.stringify({app:'森语探险',exportedAt:new Date().toISOString(),state},null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`little-english-${new Date().toISOString().slice(0,10)}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('学习记录已导出，请检查浏览器下载列表。');
 }
 document.addEventListener('click', event => {
@@ -421,17 +425,17 @@ document.addEventListener('click', event => {
   else if(action==='review-hint'&&review){review.hint=true;renderReviewModal({preserve:true});}
   else if(action==='review-answer')reviewAnswer(button.dataset.id);
   else if(action==='next-review'&&review?.correct){if(review.index===review.words.length-1)review.done=true;else {review.index++;review.hint=false;review.correct=false;review.attempts=0;review.recordedWrong=false;review.feedback='';review.choices=reviewChoices(review.words[review.index]);}renderReviewModal();if(!review.done)playCurrentPrompt();}
-  else if(action==='toggle-audio'){state.settings.slowAudio=!state.settings.slowAudio;persist();render();toast(state.settings.slowAudio?'英语会读慢一点。':'已调整为自然语速。');}
+  else if(action==='toggle-audio'){state.settings.slowAudio=!state.settings.slowAudio;const saved=persist();render();if(saved)toast(state.settings.slowAudio?'英语会读慢一点。':'已调整为自然语速。');}
   else if(action==='test-audio'){speak('Hello! I am happy to see you.',button);}
   else if(action==='export')exportRecords();
   else if(action==='ask-reset'){resetPending=true;render();$('.confirm-box')?.scrollIntoView({block:'nearest'});}
   else if(action==='cancel-reset'){resetPending=false;render();}
-  else if(action==='reset'){state=createInitialState();persist();resetPending=false;render();toast(storageOk?'这台设备的记录已清空，可以重新开始。':'页面中的记录已重置，但浏览器存储清空失败，请让家长检查。');}
+  else if(action==='reset'){const before=state;state=createInitialState();if(storageSession.rawBackup!==null){const result=storageSession.resetInvalid();storageOk=result.ok;storageMessage=result.error||'';if(!result.ok){state=before;toast(storageMessage);}}else if(!persist())state=before;resetPending=false;render();if(storageOk)toast('这台设备的记录已清空，可以重新开始。');}
 });
 document.addEventListener('submit',event=>{
   if(event.target.id!=='name-form')return;event.preventDefault();
   const name=new FormData(event.target).get('name').trim().slice(0,12);if(!name){toast('给小探险家起个名字吧。');return;}
-  state.settings.name=name;persist();render();toast('名字保存好了。');
+  state.settings.name=name;const saved=persist();render();if(saved)toast('名字保存好了。');
 });
 document.addEventListener('keydown',event=>{
   if(!lesson&&!review&&!game)return;

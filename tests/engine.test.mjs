@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LESSONS } from '../docs/content.js';
-import { STORAGE_KEY, createInitialState, loadState, saveState, completeLesson, completeGame, getDueWords, recordReview, getStats, localDateKey } from '../docs/engine.js';
+import { STORAGE_KEY, createInitialState, loadState, saveState, openStorageSession, completeLesson, completeGame, getDueWords, recordReview, getStats, localDateKey } from '../docs/engine.js';
 
 const now = new Date(2026, 10, 3, 20, 0, 0);
 const tomorrow = new Date(2026, 10, 4, 9, 0, 0);
@@ -11,6 +11,60 @@ function memoryStorage(initial) {
   let value = initial;
   return { getItem: (key) => key === STORAGE_KEY ? value ?? null : null, setItem: (_key, next) => { value = next; } };
 }
+
+test('unreadable and newer saves are preserved rather than overwritten', () => {
+  for (const raw of ['{broken', '{"version":2,"words":{"sentinel":"keep"}}', '{"version":1,"words":{"cat":{"dueAt":"invalid"}}}']) {
+    const storage = memoryStorage(raw);
+    const session = openStorageSession(storage);
+    assert.match(session.error, /保留原记录/);
+    assert.equal(session.rawBackup, raw);
+    assert.equal(session.save(createInitialState()).ok, false);
+    assert.equal(storage.getItem(STORAGE_KEY), raw);
+  }
+});
+
+test('another tab cannot silently overwrite a newer save', () => {
+  const storage = memoryStorage();
+  const first = openStorageSession(storage);
+  const stale = openStorageSession(storage);
+  const firstProgress = completeLesson(first.state, 'forest-friends', results, now);
+  assert.equal(first.save(firstProgress).ok, true);
+  const saved = storage.getItem(STORAGE_KEY);
+  const attempt = stale.save(createInitialState());
+  assert.equal(attempt.ok, false);
+  assert.match(attempt.error, /另一个页面/);
+  assert.equal(storage.getItem(STORAGE_KEY), saved);
+  assert.equal(stale.save(firstProgress).ok, false);
+  assert.deepEqual(openStorageSession(storage).state, firstProgress);
+});
+
+test('confirmed recovery replaces an unchanged unreadable save and allows later progress', () => {
+  const storage = memoryStorage('{broken');
+  const session = openStorageSession(storage);
+  assert.equal(storage.getItem(STORAGE_KEY), '{broken');
+  assert.equal(session.rawBackup, '{broken');
+  assert.equal(session.resetInvalid().ok, true);
+  assert.equal(session.rawBackup, null);
+  assert.equal(session.error, '');
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEY)), createInitialState());
+  const progress = completeLesson(session.state, 'forest-friends', results, now);
+  assert.equal(session.save(progress).ok, true);
+  assert.deepEqual(openStorageSession(storage).state, progress);
+});
+
+test('confirmed recovery refuses to erase a record changed in another tab', () => {
+  const storage = memoryStorage('{broken');
+  const session = openStorageSession(storage);
+  const otherProgress = completeLesson(createInitialState(), 'forest-friends', results, now);
+  const newer = JSON.stringify(otherProgress);
+  storage.setItem(STORAGE_KEY, newer);
+  const result = session.resetInvalid();
+  assert.equal(result.ok, false);
+  assert.match(result.error, /另一个页面/);
+  assert.equal(storage.getItem(STORAGE_KEY), newer);
+  assert.equal(session.rawBackup, '{broken');
+  assert.equal(session.resetInvalid().ok, false);
+});
 
 test('content has coherent, unique lessons and tokenized phrases', () => {
   assert.ok(LESSONS.length > 0);
